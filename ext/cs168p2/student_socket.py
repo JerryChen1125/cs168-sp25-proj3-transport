@@ -543,7 +543,7 @@ class StudentUSocket(StudentUSocketBase):
 
     ## Start of Stage 1.1 ##
     self.snd.nxt = self.snd.iss
-    p = self.new_packet(False, None, True)
+    p = self.new_packet(ack=False, syn=True)
     self.tx(p)
     self.state = SYN_SENT
     self.snd.nxt = self.snd.nxt |PLUS| 1
@@ -565,7 +565,7 @@ class StudentUSocket(StudentUSocketBase):
     if (p.tcp.SYN or p.tcp.FIN or p.tcp.payload) and not retxed:
 
       ## Start of Stage 4.4 ##
-
+      self.snd.nxt = self.snd.nxt |PLUS| len(p.tcp.payload)
       ## End of Stage 4.4 ##
       pass
 
@@ -712,7 +712,7 @@ class StudentUSocket(StudentUSocketBase):
     """
 
     ## Start of Stage 5.1 ##
-    self.snd.wnd = self.TX_DATA_MAX # remove when implemented
+    self.snd.wnd = seg.win
     self.snd.wl1 = seg.seq
     self.snd.wl2 = seg.ack
 
@@ -726,7 +726,8 @@ class StudentUSocket(StudentUSocketBase):
     acceptable_seg()
     """
     ## Start of Stage 4.2 ##
-
+    self.snd.una = seg.ack
+    acked_pkts = self.retx_queue.pop_upto(seg.ack)
     ## End of Stage 4.2 ##
 
 
@@ -779,7 +780,14 @@ class StudentUSocket(StudentUSocketBase):
     # fifth, check ACK field
     if self.state in (ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2, CLOSE_WAIT, CLOSING):
       ## Start of Stage 4.1 ##
-
+      if snd.una |LE| seg.ack and seg.ack |LE| snd.nxt:
+        self.handle_accepted_ack(seg)
+      elif seg.ack |LT| snd.una:
+        self.set_pending_ack()
+        continue_after_ack = False
+      else:
+        self.set_pending_ack()
+        return False
       ## End of Stage 4.1 ##
 
       if snd.una |LE| seg.ack and seg.ack |LE| snd.nxt:
@@ -848,12 +856,16 @@ class StudentUSocket(StudentUSocketBase):
     bytes_sent = 0
 
     ## Start of Stage 4.3 ##
-    remaining = 0
+    remaining = min(len(self.tx_data), snd.una |PLUS| snd.wnd |MINUS| snd.nxt)
     while remaining > 0:
-
+      payload_size = min(remaining, self.mss)
+      payload = self.tx_data[:payload_size]
+      packet = self.new_packet(data=payload)
+      self.tx(packet)
+      self.tx_data = self.tx_data[payload_size:]
       num_pkts += 1
-      bytes_sent += len(payload)
-
+      bytes_sent += payload_size
+      remaining -= payload_size
     self.log.debug("sent {0} packets with {1} bytes total".format(num_pkts, bytes_sent))
     ## End of Stage 4.3 ##
 
