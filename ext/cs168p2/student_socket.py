@@ -652,6 +652,7 @@ class StudentUSocket(StudentUSocketBase):
       self.rcv.nxt = seg.seq |PLUS| 1
       self.snd.una = seg.ack
       if self.snd.una |GT| self.snd.iss:
+        self.snd.nxt = seg.ack
         self.state = ESTABLISHED
         self.set_pending_ack()
         self.update_window(seg)
